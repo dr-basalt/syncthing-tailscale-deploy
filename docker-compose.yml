@@ -1,0 +1,33 @@
+version: '3.8'
+
+services:
+  syncthing:
+    image: syncthing/syncthing:latest
+    container_name: syncthing
+    hostname: ${SYNCTHING_HOSTNAME:-syncthing}
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - UMASK=022
+    volumes:
+      - /opt/syncthing/config:/var/syncthing/config
+      - /opt/syncthing/data:/var/syncthing/data
+    ports:
+      - "8384:8384"        # Web UI
+      - "22000:22000/tcp"  # TCP file transfers
+      - "22000:22000/udp"  # QUIC file transfers
+      - "21027:21027/udp"  # Receive local discovery broadcasts
+    restart: unless-stopped
+    networks:
+      - syncthing_net
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.5'
+        reservations:
+          memory: 128M
+
+networks:
+  syncthing_net:
+    driver: bridge
