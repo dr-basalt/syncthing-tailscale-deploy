@@ -1,6 +1,3 @@
-### `bootstrap.sh`
-
-```bash
 #!/bin/bash
 set -euo pipefail
 
