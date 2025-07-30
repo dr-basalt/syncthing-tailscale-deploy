@@ -1,0 +1,31 @@
+# Environment variables
+.env
+
+# Temporary files
+/tmp/
+*.tmp
+*.log
+
+# Syncthing data (local development)
+/opt/
+syncthing-data/
+
+# Docker volumes
+docker-data/
+
+# Backup files
+*.backup
+*.bak
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Runtime info files
+/tmp/*_info
