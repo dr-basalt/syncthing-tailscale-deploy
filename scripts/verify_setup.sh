@@ -97,19 +97,27 @@ test_syncthing() {
         return 1
     fi
     
-    # Test API endpoint
-    local api_test_count=0
-    while [[ $api_test_count -lt 10 ]]; do
-        if curl -s -f "http://localhost:8384/rest/system/ping" >/dev/null 2>&1; then
-            success "Syncthing API accessible"
+    # Test simple : vérifier que le container est healthy
+    local container_status=$(docker inspect syncthing --format='{{.State.Health.Status}}' 2>/dev/null || echo "")
+    if [[ "$container_status" == "healthy" ]]; then
+        success "Syncthing container healthy"
+    else
+        warn "Syncthing container status: $container_status"
+    fi
+    
+    # Test interface web (sans API pour éviter CSRF)
+    local web_test_count=0
+    while [[ $web_test_count -lt 5 ]]; do
+        if curl -s -f "http://localhost:8384/" >/dev/null 2>&1; then
+            success "Syncthing Web UI accessible"
             break
         fi
         sleep 2
-        ((api_test_count++))
+        ((web_test_count++))
     done
     
-    if [[ $api_test_count -eq 10 ]]; then
-        fail "Syncthing API non accessible"
+    if [[ $web_test_count -eq 5 ]]; then
+        fail "Syncthing Web UI non accessible"
         return 1
     fi
     
