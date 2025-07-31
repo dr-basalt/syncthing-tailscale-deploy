@@ -68,7 +68,7 @@ fi
 
 # Start Syncthing
 log "Démarrage de Syncthing..."
-docker-compose up -d
+docker compose up -d
 
 # Wait for Syncthing to start
 log "Attente du démarrage de Syncthing..."
@@ -86,7 +86,7 @@ while [[ ! -f /opt/syncthing/config/config.xml ]]; do
 done
 
 log "Arrêt temporaire pour configuration..."
-docker-compose stop
+docker compose stop
 
 # Configure Syncthing
 log "Configuration de Syncthing..."
@@ -147,7 +147,7 @@ print("Configuration Syncthing mise à jour")
 EOF
 
 log "Redémarrage de Syncthing avec la nouvelle configuration..."
-docker-compose up -d
+docker compose up -d
 
 # Wait for startup
 sleep 10
