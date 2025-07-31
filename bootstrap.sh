@@ -275,13 +275,13 @@ update_system() {
     # Install packages based on package manager
     case "$pkg_manager" in
         "apt")
-            $install_cmd curl wget jq git docker.io docker-compose-v2 iputils-ping >/dev/null 2>&1
+            $install_cmd curl wget jq git docker-compose-v2 iputils-ping >/dev/null 2>&1
             ;;
         "yum"|"dnf")
-            $install_cmd curl wget jq git docker docker-compose-v2 iputils-ping >/dev/null 2>&1
+            $install_cmd curl wget jq git docker-compose-v2 iputils-ping >/dev/null 2>&1
             ;;
         "pacman")
-            $install_cmd curl wget jq git docker docker-compose-v2 iputils-ping >/dev/null 2>&1
+            $install_cmd curl wget jq git docker-compose-v2 iputils-ping >/dev/null 2>&1
             ;;
     esac
     
