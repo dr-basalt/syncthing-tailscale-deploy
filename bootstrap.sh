@@ -1,6 +1,3 @@
-### `bootstrap.sh`
-
-```bash
 #!/bin/bash
 set -euo pipefail
 
@@ -136,48 +133,196 @@ setup_environment() {
 check_requirements() {
     info "Vérification des prérequis système..."
     
-    # Check ARM64
-    if [[ $(uname -m) != "aarch64" ]]; then
-        warn "Architecture non-ARM64 détectée: $(uname -m)"
+    # Detect and display architecture
+    local arch=$(uname -m)
+    local arch_name=""
+    local arch_optimized=false
+    
+    case "$arch" in
+        "x86_64")
+            arch_name="x86_64 (AMD64)"
+            arch_optimized=true
+            ;;
+        "aarch64")
+            arch_name="ARM64 (AArch64)" 
+            arch_optimized=true
+            ;;
+        "armv7l")
+            arch_name="ARM32 (ARMv7)"
+            arch_optimized=false
+            warn "Architecture ARM32 détectée - Performance limitée recommandée"
+            ;;
+        "i386"|"i686")
+            arch_name="x86 32-bit"
+            arch_optimized=false
+            warn "Architecture 32-bit détectée - Considérez un upgrade vers 64-bit"
+            ;;
+        *)
+            arch_name="$arch (Non testé)"
+            arch_optimized=false
+            warn "Architecture non testée: $arch"
+            ;;
+    esac
+    
+    log "Architecture détectée: $arch_name"
+    export DETECTED_ARCH="$arch"
+    export ARCH_OPTIMIZED="$arch_optimized"
+    
+    # Architecture-specific optimizations
+    if [[ "$arch_optimized" == "true" ]]; then
+        log "✅ Architecture optimisée pour ce déploiement"
+    else
+        warn "⚠️  Architecture non optimisée - Performance réduite possible"
     fi
     
-    # Check available memory
+    # Check available memory with architecture-specific recommendations
     local mem_total=$(awk '/MemTotal/ {print $2}' /proc/meminfo)
     local mem_total_mb=$((mem_total / 1024))
+    local min_mem_recommended=512
     
-    if [[ $mem_total_mb -lt 512 ]]; then
-        warn "RAM disponible: ${mem_total_mb}MB (recommandé: ≥512MB)"
+    # Adjust memory requirements based on architecture
+    case "$arch" in
+        "x86_64")
+            min_mem_recommended=512
+            ;;
+        "aarch64")
+            min_mem_recommended=512
+            ;;
+        "armv7l")
+            min_mem_recommended=256
+            warn "ARM32: Limites mémoire réduites appliquées"
+            ;;
+        "i386"|"i686")
+            min_mem_recommended=256
+            warn "32-bit: Limites mémoire réduites appliquées"
+            ;;
+    esac
+    
+    if [[ $mem_total_mb -lt $min_mem_recommended ]]; then
+        warn "RAM disponible: ${mem_total_mb}MB (recommandé: ≥${min_mem_recommended}MB pour $arch_name)"
+        
+        # Architecture-specific memory warnings
+        if [[ "$arch" == "x86_64" ]] && [[ $mem_total_mb -lt 512 ]]; then
+            warn "x86_64 avec <512MB RAM peut causer des problèmes de performance"
+        elif [[ "$arch" == "aarch64" ]] && [[ $mem_total_mb -lt 512 ]]; then
+            warn "ARM64 avec <512MB RAM peut limiter les fonctionnalités"
+        fi
     else
         log "RAM disponible: ${mem_total_mb}MB ✅"
     fi
+    
+    # Check CPU cores with architecture-specific info
+    local cpu_cores=$(nproc)
+    log "CPU cores détectés: $cpu_cores"
+    
+    # Architecture-specific CPU info
+    case "$arch" in
+        "x86_64")
+            local cpu_model=$(grep "model name" /proc/cpuinfo | head -1 | cut -d: -f2 | xargs)
+            info "CPU x86_64: ${cpu_model:-Non identifié}"
+            ;;
+        "aarch64")
+            local cpu_model=$(grep "model name" /proc/cpuinfo | head -1 | cut -d: -f2 | xargs || echo "ARM64 Generic")
+            info "CPU ARM64: ${cpu_model}"
+            ;;
+    esac
     
     # Check internet connectivity
     if ! ping -c 1 8.8.8.8 >/dev/null 2>&1; then
         error "Pas de connectivité internet"
     fi
     
-    log "Prérequis système validés ✅"
+    # Check if running in container/VM
+    if [[ -f /.dockerenv ]]; then
+        warn "Exécution dans un container Docker détectée"
+    elif grep -q "hypervisor" /proc/cpuinfo 2>/dev/null; then
+        info "Exécution dans une VM détectée"
+    fi
+    
+    log "Prérequis système validés pour $arch_name ✅"
 }
 
 # Update system
 update_system() {
     log "Mise à jour du système..."
     
+    # Detect package manager and architecture
+    local pkg_manager=""
+    local install_cmd=""
+    
     if command -v apt-get >/dev/null; then
+        pkg_manager="apt"
+        install_cmd="apt-get install -y"
         apt-get update >/dev/null 2>&1
-        apt-get install -y curl wget jq git docker.io docker-compose >/dev/null 2>&1
     elif command -v yum >/dev/null; then
+        pkg_manager="yum"
+        install_cmd="yum install -y"
         yum update -y >/dev/null 2>&1
-        yum install -y curl wget jq git docker docker-compose >/dev/null 2>&1
+    elif command -v dnf >/dev/null; then
+        pkg_manager="dnf"  
+        install_cmd="dnf install -y"
+        dnf update -y >/dev/null 2>&1
+    elif command -v pacman >/dev/null; then
+        pkg_manager="pacman"
+        install_cmd="pacman -S --noconfirm"
+        pacman -Sy >/dev/null 2>&1
     else
         error "Gestionnaire de paquets non supporté"
     fi
     
-    # Start Docker
+    log "Gestionnaire de paquets détecté: $pkg_manager"
+    
+    # Install packages based on package manager
+    case "$pkg_manager" in
+        "apt")
+            $install_cmd curl wget jq git docker.io docker-compose >/dev/null 2>&1
+            ;;
+        "yum"|"dnf")
+            $install_cmd curl wget jq git docker docker-compose >/dev/null 2>&1
+            ;;
+        "pacman")
+            $install_cmd curl wget jq git docker docker-compose >/dev/null 2>&1
+            ;;
+    esac
+    
+    # Start Docker with architecture-specific optimizations
     systemctl enable docker >/dev/null 2>&1
     systemctl start docker >/dev/null 2>&1
     
-    log "Système mis à jour ✅"
+    # Architecture-specific Docker optimizations
+    local docker_opts=""
+    case "${DETECTED_ARCH:-}" in
+        "aarch64")
+            # ARM64 optimizations
+            docker_opts="--default-ulimit nofile=1024:4096"
+            ;;
+        "x86_64")
+            # x86_64 optimizations  
+            docker_opts="--default-ulimit nofile=2048:8192"
+            ;;
+        *)
+            # Conservative defaults for other architectures
+            docker_opts="--default-ulimit nofile=1024:2048"
+            ;;
+    esac
+    
+    # Apply Docker daemon configuration if needed
+    if [[ ! -f /etc/docker/daemon.json ]]; then
+        mkdir -p /etc/docker
+        cat > /etc/docker/daemon.json << EOF
+{
+  "log-driver": "json-file",
+  "log-opts": {
+    "max-size": "10m",
+    "max-file": "3"
+  }
+}
+EOF
+        systemctl restart docker >/dev/null 2>&1
+        sleep 3
+    fi
+    
+    log "Système mis à jour pour ${DETECTED_ARCH:-unknown} ✅"
 }
 
 # Wrapper pour lancer les scripts avec les bonnes variables
