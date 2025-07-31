@@ -75,7 +75,7 @@ if [[ -z "$CF_ZONE_ID" || "$CF_ZONE_ID" == "null" ]]; then
             error "❌ Aucune zone trouvée dans votre compte Cloudflare"
         fi
     else
-        local error_msg=$(echo "$zones_response" | jq -r '.errors[0].message // "Token invalide ou permissions insuffisantes"' 2>/dev/null || echo "Réponse invalide")
+        error_msg=$(echo "$zones_response" | jq -r '.errors[0].message // "Token invalide ou permissions insuffisantes"' 2>/dev/null || echo "Réponse invalide")
         error "❌ Impossible d'accéder à l'API Cloudflare: $error_msg"
         error "Vérifiez votre CF_API_TOKEN et ses permissions (Zone:Zone:Read, Zone:DNS:Edit)"
     fi
