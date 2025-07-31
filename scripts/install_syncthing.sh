@@ -155,17 +155,48 @@ sleep 10
 # Get Device ID
 log "Récupération du Device ID..."
 DEVICE_ID=""
-for i in {1..30}; do
-    if DEVICE_ID=$(curl -s -X GET "http://localhost:8384/rest/system/status" | jq -r '.myID' 2>/dev/null); then
-        if [[ "$DEVICE_ID" != "null" && -n "$DEVICE_ID" ]]; then
-            break
+
+# Méthode 1 : Depuis les logs Docker (plus fiable)
+log "Recherche du Device ID dans les logs Docker..."
+DEVICE_ID=$(docker logs syncthing 2>&1 | grep "My ID:" | head -1 | grep -o '[A-Z0-9]\{7\}-[A-Z0-9]\{7\}-[A-Z0-9]\{7\}-[A-Z0-9]\{7\}-[A-Z0-9]\{7\}-[A-Z0-9]\{7\}-[A-Z0-9]\{7\}-[A-Z0-9]\{7\}' || echo "")
+
+if [[ -n "$DEVICE_ID" ]]; then
+    log "Device ID trouvé dans les logs: $DEVICE_ID"
+else
+    # Méthode 2 : Fallback sur le fichier de config
+    log "Tentative de lecture du Device ID depuis le fichier de configuration..."
+    
+    if [[ -f /opt/syncthing/config/config.xml ]]; then
+        DEVICE_ID=$(grep -o 'myID="[^"]*"' /opt/syncthing/config/config.xml | cut -d'"' -f2 || echo "")
+        
+        if [[ -n "$DEVICE_ID" ]]; then
+            log "Device ID trouvé dans config.xml: $DEVICE_ID"
+        else
+            # Méthode 3 : Essayer l'API sans CSRF (si désactivé)
+            log "Tentative d'accès à l'API Syncthing..."
+            
+            # Attendre que l'API soit disponible
+            for i in {1..10}; do
+                api_response=$(curl -s -H "X-API-Key: " "http://localhost:8384/rest/system/status" 2>/dev/null || echo "")
+                if [[ "$api_response" != *"CSRF Error"* && -n "$api_response" ]]; then
+                    DEVICE_ID=$(echo "$api_response" | jq -r '.myID' 2>/dev/null || echo "")
+                    if [[ -n "$DEVICE_ID" && "$DEVICE_ID" != "null" ]]; then
+                        log "Device ID récupéré via API: $DEVICE_ID"
+                        break
+                    fi
+                fi
+                sleep 2
+            done
+            
+            if [[ -z "$DEVICE_ID" ]]; then
+                warn "Impossible de récupérer le Device ID automatiquement"
+                info "Syncthing fonctionne, récupérez le Device ID manuellement :"
+                info "  - Interface web: http://localhost:8384"
+                info "  - Commande: docker logs syncthing | grep 'My ID'"
+                DEVICE_ID="MANUAL_RETRIEVAL_NEEDED"
+            fi
         fi
     fi
-    sleep 2
-done
-
-if [[ -z "$DEVICE_ID" || "$DEVICE_ID" == "null" ]]; then
-    error "Impossible de récupérer le Device ID"
 fi
 
 log "Device ID Syncthing: ${DEVICE_ID}"
