@@ -105,11 +105,14 @@ test_syncthing() {
         warn "Syncthing container status: $container_status"
     fi
     
-    # Test interface web (sans API pour éviter CSRF)
+    # Test interface web HTTPS (sans vérification SSL pour certificat auto-signé)
     local web_test_count=0
     while [[ $web_test_count -lt 5 ]]; do
-        if curl -s -f "http://localhost:8384/" >/dev/null 2>&1; then
-            success "Syncthing Web UI accessible"
+        if curl -s -f -k "https://localhost:8384/" >/dev/null 2>&1; then
+            success "Syncthing Web UI HTTPS accessible"
+            break
+        elif curl -s -f "http://localhost:8384/" >/dev/null 2>&1; then
+            success "Syncthing Web UI HTTP accessible (HTTPS pas encore activé)"
             break
         fi
         sleep 2
@@ -139,14 +142,25 @@ test_dns() {
         return 1
     fi
     
-    # Test individual hostname
-    if dig +short "$VPN_HOSTNAME" | grep -q "${TAILSCALE_IP:-}"; then
-        success "DNS individuel résolu: $VPN_HOSTNAME"
-    else
-        fail "DNS individuel non résolu: $VPN_HOSTNAME"
+    # Charger les infos DNS pour savoir quelle IP a été utilisée
+    if [[ -f /tmp/dns_info ]]; then
+        source /tmp/dns_info
     fi
     
-    # Test round-robin (at least check if it resolves)
+    # Test individual hostname avec l'IP utilisée (Tailscale ou publique)
+    if [[ -n "${USED_IP:-}" ]]; then
+        if dig +short "$VPN_HOSTNAME" | grep -q "${USED_IP}"; then
+            if [[ "$USED_IP" == "${TAILSCALE_IP:-}" ]]; then
+                success "DNS sécurisé résolu: $VPN_HOSTNAME -> $USED_IP (Tailscale)"
+            else
+                success "DNS résolu: $VPN_HOSTNAME -> $USED_IP (IP publique - Attention sécurité)"
+            fi
+        else
+            fail "DNS non résolu: $VPN_HOSTNAME"
+        fi
+    fi
+    
+    # Test round-robin
     if [[ -n "${RR_VPN_HOSTNAME:-}" ]]; then
         if dig +short "$RR_VPN_HOSTNAME" | grep -q .; then
             success "DNS Round-Robin résolu: $RR_VPN_HOSTNAME"
@@ -187,6 +201,10 @@ display_summary() {
         info "🔐 Tailscale IP: $TAILSCALE_IP"
     fi
     
+    if [[ -n "${PUBLIC_IP:-}" ]]; then
+        info "🌐 IP publique: $PUBLIC_IP"
+    fi
+    
     if [[ -n "${SYNCTHING_DEVICE_ID:-}" ]]; then
         info "📱 Device ID Syncthing: $SYNCTHING_DEVICE_ID"
     fi
@@ -201,8 +219,18 @@ display_summary() {
     
     echo
     info "📁 Dossier de synchronisation: /opt/syncthing/data/obsidian-notes"
-    info "🖥️  Interface Web: http://localhost:8384"
-    info "📱 Accessible via Tailscale depuis mobile/desktop"
+    
+    if [[ -n "${TAILSCALE_IP:-}" ]]; then
+        info "🔒 Interface Web (Sécurisé - Tailscale HTTPS): https://${TAILSCALE_IP}:8384"
+        if [[ -n "${SYNCTHING_HOSTNAME:-}" ]]; then
+            info "🔒 Interface Web (DNS sécurisé HTTPS): https://${SYNCTHING_HOSTNAME}:8384"
+        fi
+        info "✅ Accessible uniquement via Tailscale VPN avec chiffrement HTTPS"
+        info "⚠️  Certificat auto-signé : acceptez l'alerte de sécurité du navigateur"
+    else
+        warn "⚠️  Interface Web (Non sécurisé): https://localhost:8384"
+        warn "⚠️  ATTENTION: Configurez un firewall pour bloquer le port 8384 !"
+    fi
     
     echo
     log "=== ÉTAPES SUIVANTES ==="
@@ -211,6 +239,13 @@ display_summary() {
     info "3. Installer Syncthing sur les appareils clients"
     info "4. Ajouter ce serveur comme device dans Syncthing clients"
     info "   Device ID: ${SYNCTHING_DEVICE_ID:-'Non disponible'}"
+    if [[ -n "${TAILSCALE_IP:-}" ]]; then
+        info "5. 🔒 Utiliser UNIQUEMENT l'accès Tailscale HTTPS pour la sécurité"
+        info "   URL sécurisée: https://${TAILSCALE_IP}:8384"
+        info "   Note: Non, OK ou Accepter quand le navigateur signale le certificat"
+    else
+        warn "5. ⚠️  URGENT: Configurez un firewall (ufw deny 8384) !"
+    fi
     echo
 }
 
@@ -226,6 +261,7 @@ main() {
     test_tailscale && test_results+=("tailscale:OK") || test_results+=("tailscale:FAIL")
     test_docker && test_results+=("docker:OK") || test_results+=("docker:FAIL")
     test_syncthing && test_results+=("syncthing:OK") || test_results+=("syncthing:FAIL")
+    test_caddy && test_results+=("caddy:OK") || test_results+=("caddy:FAIL")
     test_dns && test_results+=("dns:OK") || test_results+=("dns:FAIL")
     test_connectivity && test_results+=("connectivity:OK") || test_results+=("connectivity:FAIL")
     
