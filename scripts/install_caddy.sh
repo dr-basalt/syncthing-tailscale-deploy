@@ -40,17 +40,104 @@ if command -v caddy >/dev/null; then
     log "Caddy déjà installé ✅"
     caddy version
 else
-    log "Installation de Caddy..."
+    log "Installation de Caddy pour architecture ${DETECTED_ARCH:-$(uname -m)}..."
     
-    # Add Caddy repository
-    curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | sudo gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
-    curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | sudo tee /etc/apt/sources.list.d/caddy-stable.list
+    # Architecture-specific installation
+    local arch=$(uname -m)
+    local install_method="repository"
     
-    # Install Caddy
-    apt-get update >/dev/null 2>&1
-    apt-get install -y caddy >/dev/null 2>&1
+    case "$arch" in
+        "x86_64")
+            install_method="repository"
+            ;;
+        "aarch64")
+            install_method="repository"
+            ;;
+        "armv7l")
+            install_method="binary" 
+            warn "ARM32: Installation via binaire (dépôt non disponible)"
+            ;;
+        "i386"|"i686")
+            install_method="binary"
+            warn "32-bit: Installation via binaire (dépôt non disponible)"
+            ;;
+        *)
+            install_method="binary"
+            warn "Architecture $arch: Installation via binaire"
+            ;;
+    esac
     
-    log "Caddy installé ✅"
+    if [[ "$install_method" == "repository" ]]; then
+        # Repository installation (x86_64, aarch64)
+        curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | sudo gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+        curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | sudo tee /etc/apt/sources.list.d/caddy-stable.list
+        
+        # Install Caddy
+        apt-get update >/dev/null 2>&1
+        apt-get install -y caddy >/dev/null 2>&1
+    else
+        # Binary installation for unsupported architectures
+        local caddy_arch=""
+        case "$arch" in
+            "armv7l")
+                caddy_arch="linux_armv7"
+                ;;
+            "i386")
+                caddy_arch="linux_386"
+                ;;
+            "i686")
+                caddy_arch="linux_386"
+                ;;
+            *)
+                error "Architecture $arch non supportée pour l'installation binaire de Caddy"
+                ;;
+        esac
+        
+        # Download and install Caddy binary
+        local caddy_version="2.7.4"
+        local download_url="https://github.com/caddyserver/caddy/releases/download/v${caddy_version}/caddy_${caddy_version}_${caddy_arch}.tar.gz"
+        
+        cd /tmp
+        curl -sL "$download_url" -o caddy.tar.gz
+        tar -xzf caddy.tar.gz caddy
+        chmod +x caddy
+        mv caddy /usr/local/bin/
+        
+        # Create systemd service
+        cat > /etc/systemd/system/caddy.service << 'EOF'
+[Unit]
+Description=Caddy
+Documentation=https://caddyserver.com/docs/
+After=network.target network-online.target
+Requires=network-online.target
+
+[Service]
+Type=notify
+User=caddy
+Group=caddy
+ExecStart=/usr/local/bin/caddy run --environ --config /etc/caddy/Caddyfile
+ExecReload=/usr/local/bin/caddy reload --config /etc/caddy/Caddyfile
+TimeoutStopSec=5s
+LimitNOFILE=1048576
+LimitNPROC=1048576
+PrivateTmp=true
+ProtectSystem=full
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+
+[Install]
+WantedBy=multi-user.target
+EOF
+        
+        # Create caddy user
+        useradd --system --home /var/lib/caddy --create-home --shell /usr/sbin/nologin caddy
+        
+        # Reload systemd
+        systemctl daemon-reload
+        
+        cd "$SCRIPT_DIR"
+    fi
+    
+    log "Caddy installé pour $arch ✅"
 fi
 
 # Create Caddy configuration directory
