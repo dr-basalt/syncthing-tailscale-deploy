@@ -166,8 +166,8 @@ upsert_dns_record() {
         if [[ "$update_success" == "true" ]]; then
             log "✅ Enregistrement mis à jour: ${name} -> ${ip}"
         else
-            local error_msg=$(echo "$update_response" | jq -r '.errors[0].message // "Erreur inconnue"' 2>/dev/null || echo "Réponse invalide")
-            error "Échec de la mise à jour: $error_msg"
+            update_error_msg=$(echo "$update_response" | jq -r '.errors[0].message // "Erreur inconnue"' 2>/dev/null || echo "Réponse invalide")
+            error "Échec de la mise à jour: $update_error_msg"
             error "Réponse complète: $update_response"
         fi
     else
@@ -179,8 +179,8 @@ upsert_dns_record() {
         if [[ "$create_success" == "true" ]]; then
             log "✅ Enregistrement créé: ${name} -> ${ip}"
         else
-            local error_msg=$(echo "$create_response" | jq -r '.errors[0].message // "Erreur inconnue"' 2>/dev/null || echo "Réponse invalide")
-            error "Échec de la création: $error_msg"
+            create_error_msg=$(echo "$create_response" | jq -r '.errors[0].message // "Erreur inconnue"' 2>/dev/null || echo "Réponse invalide")
+            error "Échec de la création: $create_error_msg"
             error "Réponse complète: $create_response"
             return 1
         fi
