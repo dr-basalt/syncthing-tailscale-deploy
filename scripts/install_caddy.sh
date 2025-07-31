@@ -75,6 +75,10 @@ else
         # Install Caddy
         apt-get update >/dev/null 2>&1
         apt-get install -y caddy >/dev/null 2>&1
+
+        mkdir -p /var/log/caddy
+        chown -R caddy:caddy /var/log/caddy
+
     else
         # Binary installation for unsupported architectures
         local caddy_arch=""
