@@ -36,10 +36,6 @@ if [[ -z "${CF_API_TOKEN:-}" ]]; then
     error "CF_API_TOKEN non défini"
 fi
 
-if [[ -z "${CF_ZONE_ID:-}" ]]; then
-    error "CF_ZONE_ID non défini"
-fi
-
 if [[ -z "${DOMAIN_ROOT:-}" ]]; then
     error "DOMAIN_ROOT non défini"
 fi
@@ -51,6 +47,43 @@ fi
 if [[ -z "${HOSTNAME_SUFFIX:-}" ]]; then
     error "HOSTNAME_SUFFIX non défini"
 fi
+
+# Auto-discovery du Zone ID depuis le nom de domaine
+log "Récupération automatique du Zone ID pour ${DOMAIN_ROOT}..."
+CF_ZONE_ID=$(curl -s -X GET "https://api.cloudflare.com/v4/zones?name=${DOMAIN_ROOT}" \
+  -H "Authorization: Bearer ${CF_API_TOKEN}" \
+  -H "Content-Type: application/json" | jq -r '.result[0].id // empty' 2>/dev/null || echo "")
+
+if [[ -z "$CF_ZONE_ID" || "$CF_ZONE_ID" == "null" ]]; then
+    # Essayer de lister toutes les zones pour debug
+    log "Zone non trouvée directement, listing des zones disponibles..."
+    zones_response=$(curl -s -X GET "https://api.cloudflare.com/v4/zones" \
+        -H "Authorization: Bearer ${CF_API_TOKEN}" \
+        -H "Content-Type: application/json")
+    
+    zones_success=$(echo "$zones_response" | jq -r '.success // false' 2>/dev/null || echo "false")
+    
+    if [[ "$zones_success" == "true" ]]; then
+        zones_list=$(echo "$zones_response" | jq -r '.result[]? | .name' 2>/dev/null || echo "")
+        if [[ -n "$zones_list" ]]; then
+            warn "Zones disponibles dans votre compte Cloudflare:"
+            echo "$zones_list" | while read -r zone; do
+                info "  - $zone"
+            done
+            error "❌ Zone '${DOMAIN_ROOT}' non trouvée. Vérifiez que le domaine est bien dans votre compte Cloudflare."
+        else
+            error "❌ Aucune zone trouvée dans votre compte Cloudflare"
+        fi
+    else
+        local error_msg=$(echo "$zones_response" | jq -r '.errors[0].message // "Token invalide ou permissions insuffisantes"' 2>/dev/null || echo "Réponse invalide")
+        error "❌ Impossible d'accéder à l'API Cloudflare: $error_msg"
+        error "Vérifiez votre CF_API_TOKEN et ses permissions (Zone:Zone:Read, Zone:DNS:Edit)"
+    fi
+    exit 1
+fi
+
+export CF_ZONE_ID
+log "✅ Zone ID trouvé: ${CF_ZONE_ID}"
 
 # Cloudflare API headers
 CF_HEADERS=(
@@ -66,14 +99,23 @@ cf_api() {
     
     local url="https://api.cloudflare.com/v4/zones/${CF_ZONE_ID}/dns_records${endpoint}"
     
+    log "API Call: $method $url"
+    
+    local response=""
     if [[ -n "$data" ]]; then
-        curl -s -X "$method" "$url" \
-            "${CF_HEADERS[@]/#/-H }" \
-            -d "$data"
+        info "Données envoyées: $data"
+        response=$(curl -s -X "$method" "$url" \
+            -H "Authorization: Bearer ${CF_API_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d "$data")
     else
-        curl -s -X "$method" "$url" \
-            "${CF_HEADERS[@]/#/-H }"
+        response=$(curl -s -X "$method" "$url" \
+            -H "Authorization: Bearer ${CF_API_TOKEN}" \
+            -H "Content-Type: application/json")
     fi
+    
+    info "Réponse API: $response"
+    echo "$response"
 }
 
 # Function to get existing DNS record
@@ -92,7 +134,14 @@ upsert_dns_record() {
     
     # Check if record exists
     local response=$(get_dns_record "$name")
-    local record_id=$(echo "$response" | jq -r '.result[0].id // empty')
+    local success=$(echo "$response" | jq -r '.success // false' 2>/dev/null || echo "false")
+    
+    if [[ "$success" != "true" ]]; then
+        warn "Erreur lors de la vérification des enregistrements existants"
+        info "Réponse: $response"
+    fi
+    
+    local record_id=$(echo "$response" | jq -r '.result[0].id // empty' 2>/dev/null || echo "")
     
     local data=$(jq -n \
         --arg name "$name" \
@@ -106,25 +155,34 @@ upsert_dns_record() {
             proxied: false
         }')
     
+    log "Données JSON à envoyer: $data"
+    
     if [[ -n "$record_id" && "$record_id" != "null" ]]; then
         # Update existing record
-        log "Mise à jour de l'enregistrement existant: ${name}"
+        log "Mise à jour de l'enregistrement existant: ${name} (ID: ${record_id})"
         local update_response=$(cf_api "PUT" "/${record_id}" "$data")
         
-        if echo "$update_response" | jq -e '.success' >/dev/null; then
+        local update_success=$(echo "$update_response" | jq -r '.success // false' 2>/dev/null || echo "false")
+        if [[ "$update_success" == "true" ]]; then
             log "✅ Enregistrement mis à jour: ${name} -> ${ip}"
         else
-            error "Échec de la mise à jour: $(echo "$update_response" | jq -r '.errors[0].message // "Erreur inconnue"')"
+            local error_msg=$(echo "$update_response" | jq -r '.errors[0].message // "Erreur inconnue"' 2>/dev/null || echo "Réponse invalide")
+            error "Échec de la mise à jour: $error_msg"
+            error "Réponse complète: $update_response"
         fi
     else
         # Create new record
         log "Création d'un nouvel enregistrement: ${name}"
         local create_response=$(cf_api "POST" "" "$data")
         
-        if echo "$create_response" | jq -e '.success' >/dev/null; then
+        local create_success=$(echo "$create_response" | jq -r '.success // false' 2>/dev/null || echo "false")
+        if [[ "$create_success" == "true" ]]; then
             log "✅ Enregistrement créé: ${name} -> ${ip}"
         else
-            error "Échec de la création: $(echo "$create_response" | jq -r '.errors[0].message // "Erreur inconnue"')"
+            local error_msg=$(echo "$create_response" | jq -r '.errors[0].message // "Erreur inconnue"' 2>/dev/null || echo "Réponse invalide")
+            error "Échec de la création: $error_msg"
+            error "Réponse complète: $create_response"
+            return 1
         fi
     fi
 }
@@ -133,6 +191,7 @@ upsert_dns_record() {
 main() {
     log "Configuration DNS Cloudflare pour ${DOMAIN_ROOT}"
     
+    # Le Zone ID est déjà récupéré et validé dans la section précédente
     # Individual server records
     local vpn_hostname="vpn-syncthing-${HOSTNAME_SUFFIX}.${DOMAIN_ROOT}"
     local syncthing_hostname="syncthing-${HOSTNAME_SUFFIX}.${DOMAIN_ROOT}"
