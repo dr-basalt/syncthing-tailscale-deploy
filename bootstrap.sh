@@ -66,10 +66,6 @@ configure_interactively() {
         read -p "Cloudflare API Token: " CF_API_TOKEN
     fi
     
-    if [[ -z "${CF_ZONE_ID:-}" ]]; then
-        read -p "Cloudflare Zone ID: " CF_ZONE_ID
-    fi
-    
     if [[ -z "${DOMAIN_ROOT:-}" ]]; then
         read -p "Domaine racine [ori3com.cloud]: " DOMAIN_ROOT
         DOMAIN_ROOT=${DOMAIN_ROOT:-ori3com.cloud}
@@ -85,11 +81,10 @@ configure_interactively() {
     fi
 }
 
-# Validation des variables requises
-validate_config() {
+# Validation et export des variables requises
+setup_environment() {
     local required_vars=(
         "CF_API_TOKEN"
-        "CF_ZONE_ID" 
         "DOMAIN_ROOT"
         "TAILSCALE_AUTH_KEY"
         "HOSTNAME_SUFFIX"
@@ -184,7 +179,6 @@ run_script() {
     # Lancement du script avec env explicite pour être sûr
     env \
         CF_API_TOKEN="$CF_API_TOKEN" \
-        CF_ZONE_ID="$CF_ZONE_ID" \
         DOMAIN_ROOT="$DOMAIN_ROOT" \
         TAILSCALE_AUTH_KEY="$TAILSCALE_AUTH_KEY" \
         HOSTNAME_SUFFIX="$HOSTNAME_SUFFIX" \
@@ -199,7 +193,7 @@ main() {
     
     check_requirements
     configure_interactively
-    validate_config
+    setup_environment
     update_system
     
     # Lancement des scripts avec les variables exportées
