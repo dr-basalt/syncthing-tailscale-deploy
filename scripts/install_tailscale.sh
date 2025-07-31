@@ -3,6 +3,12 @@ set -euo pipefail
 
 # 🔐 Tailscale Installation Script for ARM64
 
+# Source environment if available
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [[ -f "$SCRIPT_DIR/../.env" ]]; then
+    source "$SCRIPT_DIR/../.env"
+fi
+
 GREEN='\033[0;32m'
 RED='\033[0;31m'
 NC='\033[0m'
@@ -38,11 +44,11 @@ log "Tailscale installé ✅"
 
 # Configure Tailscale
 if [[ -z "${TAILSCALE_AUTH_KEY:-}" ]]; then
-    error "TAILSCALE_AUTH_KEY non défini"
+    error "TAILSCALE_AUTH_KEY non défini. Vérifiez votre fichier .env ou relancez en mode interactif"
 fi
 
 if [[ -z "${SERVER_NAME:-}" ]]; then
-    error "SERVER_NAME non défini"
+    error "SERVER_NAME non défini. Vérifiez la configuration"
 fi
 
 log "Connexion à Tailscale avec hostname: ${SERVER_NAME}"
