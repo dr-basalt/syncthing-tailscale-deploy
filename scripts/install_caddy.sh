@@ -291,7 +291,7 @@ EOF
 
 # Restart Syncthing to apply changes
 log "Redémarrage de Syncthing..."
-docker-compose restart syncthing >/dev/null 2>&1
+docker compose restart syncthing >/dev/null 2>&1
 
 # Save Caddy info
 cat > /tmp/caddy_info << EOF
