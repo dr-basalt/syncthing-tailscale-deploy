@@ -17,6 +17,9 @@ docker-data/
 *.backup
 *.bak
 
+# Caddy logs (if using Caddy)
+/var/log/caddy/
+
 # OS files
 .DS_Store
 Thumbs.db
