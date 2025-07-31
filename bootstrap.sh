@@ -39,9 +39,9 @@ fi
 # Load environment variables
 if [[ -f .env ]]; then
     source .env
-    log "Variables d'environnement chargées depuis .env"
+    log "Variables d'environnement chargées depuis .env ✅"
 else
-    warn "Fichier .env non trouvé"
+    error "Fichier .env non trouvé. Copiez .env.example vers .env et configurez-le."
 fi
 
 # Interactive mode if --auto not specified
@@ -64,29 +64,24 @@ configure_interactively() {
     
     if [[ -z "${CF_API_TOKEN:-}" ]]; then
         read -p "Cloudflare API Token: " CF_API_TOKEN
-        export CF_API_TOKEN
     fi
     
     if [[ -z "${CF_ZONE_ID:-}" ]]; then
         read -p "Cloudflare Zone ID: " CF_ZONE_ID
-        export CF_ZONE_ID
     fi
     
     if [[ -z "${DOMAIN_ROOT:-}" ]]; then
         read -p "Domaine racine [ori3com.cloud]: " DOMAIN_ROOT
         DOMAIN_ROOT=${DOMAIN_ROOT:-ori3com.cloud}
-        export DOMAIN_ROOT
     fi
     
     if [[ -z "${TAILSCALE_AUTH_KEY:-}" ]]; then
         read -p "Tailscale Auth Key: " TAILSCALE_AUTH_KEY
-        export TAILSCALE_AUTH_KEY
     fi
     
     if [[ -z "${HOSTNAME_SUFFIX:-}" ]]; then
         read -p "Suffixe hostname [01]: " HOSTNAME_SUFFIX
         HOSTNAME_SUFFIX=${HOSTNAME_SUFFIX:-01}
-        export HOSTNAME_SUFFIX
     fi
 }
 
@@ -100,13 +95,26 @@ validate_config() {
         "HOSTNAME_SUFFIX"
     )
     
+    log "Validation et export des variables d'environnement..."
     for var in "${required_vars[@]}"; do
         if [[ -z "${!var:-}" ]]; then
-            error "Variable requise manquante: $var"
+            error "Variable requise manquante: $var. Vérifiez votre fichier .env"
+        else
+            log "✓ $var configuré"
+            export "$var"  # Export explicite
         fi
     done
     
-    log "Configuration validée ✅"
+    # Générer et exporter les variables dérivées
+    export SERVER_NAME="vpn-syncthing-${HOSTNAME_SUFFIX}"
+    export SYNCTHING_HOSTNAME="syncthing-${HOSTNAME_SUFFIX}"
+    
+    log "Variables exportées:"
+    info "  - SERVER_NAME: $SERVER_NAME"
+    info "  - SYNCTHING_HOSTNAME: $SYNCTHING_HOSTNAME"
+    info "  - TAILSCALE_AUTH_KEY: ${TAILSCALE_AUTH_KEY:0:20}..."
+    
+    log "Configuration validée et variables exportées ✅"
 }
 
 # Check system requirements
@@ -157,6 +165,34 @@ update_system() {
     log "Système mis à jour ✅"
 }
 
+# Wrapper pour lancer les scripts avec les bonnes variables
+run_script() {
+    local script_name="$1"
+    local script_path="scripts/$script_name"
+    
+    if [[ ! -f "$script_path" ]]; then
+        error "Script non trouvé: $script_path"
+    fi
+    
+    log "Exécution de $script_name..."
+    
+    # Vérification que les variables sont bien exportées
+    if [[ -z "${TAILSCALE_AUTH_KEY:-}" ]]; then
+        error "TAILSCALE_AUTH_KEY non exporté avant lancement de $script_name"
+    fi
+    
+    # Lancement du script avec env explicite pour être sûr
+    env \
+        CF_API_TOKEN="$CF_API_TOKEN" \
+        CF_ZONE_ID="$CF_ZONE_ID" \
+        DOMAIN_ROOT="$DOMAIN_ROOT" \
+        TAILSCALE_AUTH_KEY="$TAILSCALE_AUTH_KEY" \
+        HOSTNAME_SUFFIX="$HOSTNAME_SUFFIX" \
+        SERVER_NAME="$SERVER_NAME" \
+        SYNCTHING_HOSTNAME="$SYNCTHING_HOSTNAME" \
+        bash "$script_path"
+}
+
 # Main execution
 main() {
     log "🚀 Démarrage du déploiement Syncthing + Tailscale"
@@ -166,21 +202,11 @@ main() {
     validate_config
     update_system
     
-    # Export variables for sub-scripts
-    export SERVER_NAME="vpn-syncthing-${HOSTNAME_SUFFIX}"
-    export SYNCTHING_HOSTNAME="syncthing-${HOSTNAME_SUFFIX}"
-    
-    log "Installation de Tailscale..."
-    bash scripts/install_tailscale.sh
-    
-    log "Installation de Syncthing..."
-    bash scripts/install_syncthing.sh
-    
-    log "Configuration DNS Cloudflare..."
-    bash scripts/cf_dns_register.sh
-    
-    log "Vérification du déploiement..."
-    bash scripts/verify_setup.sh
+    # Lancement des scripts avec les variables exportées
+    run_script "install_tailscale.sh"
+    run_script "install_syncthing.sh"
+    run_script "cf_dns_register.sh"
+    run_script "verify_setup.sh"
     
     echo
     log "🎉 Déploiement terminé avec succès!"
