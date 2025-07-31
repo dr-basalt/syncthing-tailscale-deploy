@@ -1,3 +1,6 @@
+### `bootstrap.sh`
+
+```bash
 #!/bin/bash
 set -euo pipefail
 
@@ -79,6 +82,19 @@ configure_interactively() {
         read -p "Suffixe hostname [01]: " HOSTNAME_SUFFIX
         HOSTNAME_SUFFIX=${HOSTNAME_SUFFIX:-01}
     fi
+    
+    if [[ -z "${ENABLE_CADDY:-}" ]]; then
+        echo
+        info "Caddy Reverse Proxy avec SSL automatique ?"
+        info "- OUI: Certificats SSL valides automatiques"
+        info "- NON: HTTPS Syncthing intégré (certificat auto-signé)"
+        read -p "Activer Caddy ? [y/N]: " caddy_choice
+        if [[ "$caddy_choice" =~ ^[Yy]$ ]]; then
+            ENABLE_CADDY="true"
+        else
+            ENABLE_CADDY="false"
+        fi
+    fi
 }
 
 # Validation et export des variables requises
@@ -104,9 +120,13 @@ setup_environment() {
     export SERVER_NAME="vpn-syncthing-${HOSTNAME_SUFFIX}"
     export SYNCTHING_HOSTNAME="syncthing-${HOSTNAME_SUFFIX}"
     
+    # Configuration Caddy
+    export ENABLE_CADDY="${ENABLE_CADDY:-false}"
+    
     log "Variables exportées:"
     info "  - SERVER_NAME: $SERVER_NAME"
     info "  - SYNCTHING_HOSTNAME: $SYNCTHING_HOSTNAME"
+    info "  - ENABLE_CADDY: $ENABLE_CADDY"
     info "  - TAILSCALE_AUTH_KEY: ${TAILSCALE_AUTH_KEY:0:20}..."
     
     log "Configuration validée et variables exportées ✅"
@@ -184,6 +204,7 @@ run_script() {
         HOSTNAME_SUFFIX="$HOSTNAME_SUFFIX" \
         SERVER_NAME="$SERVER_NAME" \
         SYNCTHING_HOSTNAME="$SYNCTHING_HOSTNAME" \
+        ENABLE_CADDY="$ENABLE_CADDY" \
         bash "$script_path"
 }
 
@@ -199,6 +220,15 @@ main() {
     # Lancement des scripts avec les variables exportées
     run_script "install_tailscale.sh"
     run_script "install_syncthing.sh"
+    
+    # Installation optionnelle de Caddy
+    if [[ "${ENABLE_CADDY:-false}" == "true" ]]; then
+        log "Installation de Caddy (reverse proxy SSL)..."
+        run_script "install_caddy.sh"
+    else
+        log "Caddy désactivé - Utilisation de HTTPS Syncthing intégré"
+    fi
+    
     run_script "cf_dns_register.sh"
     run_script "verify_setup.sh"
     
